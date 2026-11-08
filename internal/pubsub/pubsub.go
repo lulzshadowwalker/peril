@@ -1,22 +1,21 @@
 package pubsub
-
 import (
 	"context"
 	"encoding/json"
 	"log/slog"
 
-	"github.com/rabbitmq/amqp091-go"
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func PublishJSON[T any](ch *amqp091.Channel, exchange, key string, val T) error {
+func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
 	data, err := json.Marshal(val)
 	if err != nil {
 		return err
 	}
 
-	err = ch.PublishWithContext(context.Background(), exchange, key, false, false, amqp091.Publishing{
+	err = ch.PublishWithContext(context.Background(), exchange, key, false, false, amqp.Publishing{
 		ContentType: "application/json",
-		Body: data,
+		Body:        data,
 	})
 
 	if err != nil {
@@ -26,4 +25,42 @@ func PublishJSON[T any](ch *amqp091.Channel, exchange, key string, val T) error 
 	}
 
 	return err
+}
+
+type QueueType int
+
+const (
+	QueueTypeDurable QueueType = iota
+	QueueTypeTransient
+)
+
+type QueueConfig struct {
+	Durable    bool
+	AutoDelete bool
+	Exclusive  bool
+	NoWait     bool
+	Args       map[string]any
+}
+
+func (t QueueType) Config() QueueConfig {
+	if t == QueueTypeTransient {
+		return QueueConfig{AutoDelete: true, Exclusive: true}
+	}
+
+	return QueueConfig{Durable: true}
+}
+
+func DeclareAndBind(ch *amqp.Channel, name, exchange, key string, t QueueType) (amqp.Queue, error) {
+	c := t.Config()
+	q, err := ch.QueueDeclare(name, c.Durable, c.AutoDelete, c.Exclusive, c.NoWait, c.Args)
+	if err != nil {
+		return amqp.Queue{}, err
+	}
+
+	err = ch.QueueBind(name, key, exchange, c.NoWait, nil)
+	if err != nil {
+		return amqp.Queue{}, err
+	}
+
+	return q, nil
 }
